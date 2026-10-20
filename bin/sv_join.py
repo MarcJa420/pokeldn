@@ -38,7 +38,7 @@ from pokeldn import gen9, panel, progress, sv
 from pokeldn.ldn import ldn_mitm, pia6, pia_connect, reliable5
 from pokeldn.sv import circle, pokemon, port2, raid, reference, streams, trade, wild
 from pokeldn.ldn import channel_table, game_channel
-from pokeldn.ldn.transport import board_radio, find_ap_phy
+from pokeldn.ldn.transport import board_radio, find_ap_phy, cleanup_stale_vifs as cleanup_stale
 from pokeldn.host_support import resolve_keys, needs_root
 from pokeldn.ldn import show_done, trades_done
 from pokeldn.app import screen
@@ -89,29 +89,6 @@ ACK_ENTRIES = 4  # a retail station's bulk ack carries four
 MIRRORED_FLAGS = (reliable5.FLAG_APPLICATION_DATA | reliable5.FLAG_MESSAGE_START
                   | reliable5.FLAG_MESSAGE_END | reliable5.FLAG_ZLIB)
 
-PROTOCOL_NAMES = {
-    0x2C: "net", 0x58: "rtt", 0x68: "unreliable", 0x74: "clone atomic", 0x77: "clone clock",
-    0x7C: "reliable", 0x80: "broadcast reliable", 0x81: "stream broadcast reliable",
-    0x98: "session", 0xA4: "monitoring data",
-}
-SESSION_MESSAGE_NAMES = {
-    0: "join request", 1: "join request ack", 2: "join response", 3: "leave request",
-    5: "update session", 6: "update session ack", 7: "start host migration",
-    8: "start host migration ack",
-}
-# Session type 7 here is LeaveMeshWithHostMigrationJob (0x6d8de0) handing the host role over, not
-# the wiki's left-station sync (docs/sv.md).
-
-STALE_VIFS = ["ldn", "ldn-mon", "ldn-tap", "ldnclient"]
-
-
-def cleanup_stale():
-    if board_radio():
-        return
-    import subprocess
-    for name in STALE_VIFS:
-        subprocess.run(["iw", "dev", name, "del"],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def set_mac(phy, mac, log=print):
@@ -140,53 +117,11 @@ def set_mac(phy, mac, log=print):
 
 
 def make_socket(ifname, our_ip=None):
-    from pokeldn.ldn import userspace_ip
-    if our_ip is None and (user := userspace_ip.udp_socket(ifname, sv.PIA_PORT)) is not None:
-        user.setblocking(False)
-        return user
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    if our_ip is None:
-        try:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, ifname.encode())
-        except (PermissionError, OSError):
-            pass
-    s.bind((our_ip or "", sv.PIA_PORT))
-    s.setblocking(False)
-    return s
+    from pokeldn.ldn import userspace_ip  # no kernel interface on the ESP32
+    return userspace_ip.pia_socket(ifname, sv.PIA_PORT, our_ip)
 
 
-def ip_scan_once(our_ip, host_ip, timeout):
-    """-> the host's NetworkInfo, or None. ldn_mitm drops a scan from the host's own address."""
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as us:
-        us.settimeout(timeout)
-        us.bind((our_ip, 0))
-        try:
-            us.sendto(ldn_mitm.build(ldn_mitm.SCAN), (host_ip, ldn_mitm.PORT))
-            while True:
-                data, _ = us.recvfrom(4096)
-                kind, info = ldn_mitm.parse(data)
-                if kind == ldn_mitm.SCAN_RESP:
-                    return info
-        except (socket.timeout, OSError, ValueError):
-            return None
-
-
-def ip_associate(our_ip, host_ip, our_mac, name, timeout):
-    """-> (NetworkInfo, TCP socket the host holds open for the session)."""
-    tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    tcp.settimeout(timeout)
-    tcp.bind((our_ip, 0))
-    tcp.connect((host_ip, ldn_mitm.PORT))
-    tcp.sendall(ldn_mitm.build(ldn_mitm.CONNECT,
-                               ldn_mitm.build_node_info(our_ip, our_mac, name.encode())))
-    kind, synced = ldn_mitm.parse(tcp.recv(8192))
-    if kind != ldn_mitm.SYNC_NETWORK:
-        tcp.close()
-        raise RuntimeError(f"the host answered our connect with type {kind}, not SyncNetwork")
-    tcp.settimeout(None)
-    return synced, tcp
+ip_scan_once, ip_associate = ldn_mitm.scan_once, ldn_mitm.associate
 
 
 def ip_comm_id(network_info):
@@ -200,15 +135,6 @@ def describe(net):
     return (f"comm_id=0x{net.local_communication_id:016x}{' (' + tag + ')' if tag else ''} "
             f"scene={net.scene_id} version={net.version} app_version={net.app_version} "
             f"ch={net.channel} {net.num_participants}/{net.max_participants}")
-
-
-def _describe_msg(msg):
-    name = PROTOCOL_NAMES.get(msg.protocol, "?")
-    extra = ""
-    if msg.protocol == PROTO_SESSION and msg.payload:
-        extra = f" {SESSION_MESSAGE_NAMES.get(msg.payload[0], '?')}({msg.payload[0]})"
-    return (f"proto 0x{msg.protocol:02x} {name}{extra} port={msg.port} "
-            f"flags=0x{msg.message_flags:02x} len={len(msg.payload)}")
 
 
 def build_out(keys, our_ip, body, dst_var, *, protocol, port=0, flags=0, src_var=OUR_VAR):
@@ -245,7 +171,7 @@ def build_parser():
                     help="join only a console searching with this Link Code; empty takes any")
     ap.add_argument("--comm-id", default=None,
                     help="local communication id to join, hex; default is either cartridge's")
-    ap.add_argument("--keys", default="~/.switch/prod.keys")
+    ap.add_argument("--keys", default=None)
     ap.add_argument("--ip-join", action="store_true",
                     help="join an emulated console over the LAN through ldn_mitm instead of the "
                          "radio: no root, no phy, no prod.keys")
@@ -792,7 +718,7 @@ def host_argv(args, channel, seconds):
     fixed[fixed.index("--seconds") + 1] = str(int(max(seconds, 60)))
     del fixed[fixed.index("--offer-out"):fixed.index("--offer-out") + 2]
     code = next(f for f in tool.fields if f.flag == "--code")
-    argv = command("--run", "bin/sv_host.py", "--keys", args.keys, *fixed,
+    argv = command("--run", "bin/sv_host.py", "--keys", resolve_keys(args.keys), *fixed,
                    *(["--code", args.code] if args.code else code.unset))
     for path in args.trade_offer:
         argv += ["--trade-offer", path]
@@ -1323,7 +1249,7 @@ async def run_session(args, keys, host_ip, host_mac, our_ip, our_mac, record):
                 member.on_frame(msg.payload, time.time())
             if msg.protocol not in (PROTO_RTT,) or args.verbose_rtt:
                 if args.print_packets:
-                    print(f"[sv] <- {addr[0]} {_describe_msg(msg)}  {msg.payload.hex()[:160]}")
+                    print(f"[sv] <- {addr[0]} {sv.session.describe_message(msg)}  {msg.payload.hex()[:160]}")
             if msg.protocol == PROTO_NET and len(msg.payload) > 1:
                 if msg.payload[:2] == bytes([1, pia_connect.NET_START_HOST_MIGRATION]):
                     host_leaving = True
@@ -1355,7 +1281,7 @@ async def run_session(args, keys, host_ip, host_mac, our_ip, our_mac, record):
                 if (leaving is not None and kind == pia_connect.SESSION_LEAVE_RESPONSE
                         and msg.payload[5:17] == pia_connect._location_id(our_const, ours["var"])):
                     leaving["answered"] = True
-                print(f"[sv] the host spoke Session: {SESSION_MESSAGE_NAMES.get(kind, '?')}")
+                print(f"[sv] the host spoke Session: {sv.session.SESSION_MESSAGE_NAMES.get(kind, '?')}")
                 if kind == pia_connect.SESSION_JOIN_RESPONSE:
                     resp = pia_connect.parse_session_join_response_v11(msg.payload)
                     if resp is None:

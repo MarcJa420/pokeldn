@@ -31,7 +31,7 @@ from pokeldn.bdsp.host import (APP_VERSION, MAX_PARTICIPANTS, SCENE_UNION_ROOM,
                                HostSession, TradePartner)
 from pokeldn.bdsp.session import COMM_ID, PASSPHRASE
 from pokeldn.host_support import resolve_keys, needs_root
-from pokeldn.ldn.transport import HostTransport, board_radio, find_ap_phy
+from pokeldn.ldn.transport import HostTransport, find_ap_phy
 
 SHOWN = {"seat", "left", "session_ack", "connection_request", "request_not_ours",
          "connection_acked", "join_request", "join_acked", "mesh_rx", "rx_bad", "their_emote",
@@ -45,7 +45,7 @@ def build_parser():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--seconds", type=float, default=600.0, help="how long to host")
-    ap.add_argument("--keys", default="~/.switch/prod.keys")
+    ap.add_argument("--keys", default=None)
     ap.add_argument("--capture", default=None, help="every datagram and event, one JSON line each")
     ap.add_argument("--channel", type=int, default=6)
     ap.add_argument("--ldn-protocol", type=int, default=1, choices=(1, 3),

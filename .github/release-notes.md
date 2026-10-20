@@ -1,22 +1,19 @@
-# pokeldn 0.32.0
+# pokeldn 0.33.1
 
 This desktop app trades with seven Pokemon game families on a Switch or Switch 2
 through an ESP32 radio connected by USB. Nothing is installed on the console.
 
 ## What is new
 
-- Sword/Shield Max Raid (Host): host a den raid your console joins, with a chosen, Gigantamax or
-  past Wild Area Event boss, and the rewards you pick among that den's own.
-- Sword/Shield Dynamax Adventure (Host): host a Max Lair whose legendary you choose; once the
-  adventure starts, a computer partner takes pokeldn's seat.
-- Scarlet/Violet Union Circle: join a console's circle as a guest. Union Circle - Quests gives the
-  host the BP you choose or every Blueberry Quest still missing for Snacksworth's legendaries.
-  Union Circle - Encounters spawns a wild Pokemon you craft around the host's player, to battle and
-  catch; with Legal encounters only, it spawns only where PKHeX accepts the catch as legal.
-- Language packs now translate game data too: species, moves, natures, abilities, forms and
-  PKHeX's legality messages show in the pack's language.
+A maintenance release: no new features, and trades, gifts and raids behave as in 0.33.0.
 
-The radio firmware stays at 1.6.2 and the controller firmware at 1.3.0; no board update is needed.
+- Unused code and duplicated helpers removed; the app and its launchers share one copy of the
+  record encryption, session keys and link codes of Sword/Shield, Scarlet/Violet, Legends Arceus
+  and Legends Z-A.
+- Command line: every launcher reads the keys path set in `config/host.local.toml`, and
+  `frlg_mg_client.py` reports a mistyped `--password` or `--connect-id` instead of crashing.
+
+The radio firmware stays at 1.7.0 and the controller firmware at 1.3.0; no board update is needed.
 
 pokeldn is an unofficial fan project, not affiliated with Nintendo or The Pokemon Company. It is not
 meant for commercial or promotional use; see the License section of the README.

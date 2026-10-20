@@ -20,11 +20,10 @@ from pokeldn.host_support import open_output
 from pokeldn import pokemon as pokemon_service
 from pokeldn import config, za
 from pokeldn.za import host as za_host
-from pokeldn.za import streams
 from pokeldn.online import session as online
 from pokeldn import receiver_gift
 from pokeldn.ldn.ldn_mitm_host import IpHostTransport
-from pokeldn.ldn.transport import HostTransport, board_radio, find_ap_phy
+from pokeldn.ldn.transport import HostTransport, find_ap_phy
 from pokeldn.host_support import resolve_keys, needs_root
 
 
@@ -39,7 +38,7 @@ def build_parser():
     ap.add_argument("--phy", default="auto")
     ap.add_argument("--channel", type=int, default=6,
                     help="a searching console put both of its measured sessions on channel 6")
-    ap.add_argument("--keys", default="~/.switch/prod.keys")
+    ap.add_argument("--keys", default=None)
     ap.add_argument("--code", default="00000000", help="the link code the player types")
     ap.add_argument("--capture", default=None, help="every datagram as one JSON line")
     ap.add_argument("--player-name", default=" ",

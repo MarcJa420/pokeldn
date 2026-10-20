@@ -57,8 +57,9 @@ Switch `prod.keys`, and a Switch or Switch 2 with a supported game.
 
 On a phone:
 
-- **Android**: install `pokeldn-android-arm64.apk` from Releases and plug an ESP32-S3, C3 or C6 into
-  the phone with a USB data cable ([Android setup](docs/gui.md#android-setup-requirements)).
+- **Android**: install `pokeldn-android-arm64.apk` from Releases and plug an ESP32-S3, C3 or C6, or a
+  classic ESP32 with a CP210x USB chip, into the phone with a USB data cable
+  ([Android setup](docs/gui.md#android-setup-requirements)).
 - **iPhone and iPad**: install `pokeldn-ios.ipa` with AltStore or SideStore (the app's
   [AltStore source](https://raw.githubusercontent.com/Decryptu/pokeldn/main/.github/altstore/source.json)).
   Flash the board once with the **Bluetooth wireless** firmware from the desktop app's Board page; it
@@ -103,7 +104,8 @@ Contributors to this repository (GitHub does not list contributors on a fork):
   reverse engineering and reconstruction of the RaidPoint structure, including reward encoding and
   raid bootstrap compression, and hosted raid reward templates
 - [easyworld](https://github.com/easyworld): ESP32 serial reconnects after a high-baud session, and
-  language packs that translate game names, module messages, tool help and the documentation
+  language packs that translate game names, module messages, tool help, the documentation and its
+  page titles, game choices and raid partners' names
 - [capito27](https://github.com/capito27): Scarlet/Violet event Tera Raids, the raid finder's reward
   filter, its full seed search, its ranking by rewards and its size mark filter, and the Tera Raid
   NPC partners: their draw from the RaidPoint and the host's choice of them; Simulated Mystery Gifts
@@ -112,10 +114,15 @@ Contributors to this repository (GitHub does not list contributors on a fork):
   ESP32 credit for a frame still being written, near doubling USB upload speed, and the
   Scarlet/Violet Union Circle guest: Blueberry Quest clears, Snacksworth's legendaries and
   crafted wild encounters
+- [DedHapp3n](https://github.com/DedHapp3n): classic ESP32 boards with a CP210x USB chip in the Android
+  app
 - [elsardine6k7](https://github.com/elsardine6k7): friendship in the Pokemon builder, Showdown sets and
   the Simulated Mystery Gift queue
 - [junkmailkeep](https://github.com/junkmailkeep): Mystery Gift sprites and form previews in the gift
   and trade editors
+- [MarcJa420](https://github.com/MarcJa420): the E32R40T 4-inch screen build, the firmware version on
+  the idle screen, hosted raid and Dynamax Adventure lobbies on the board's screen, and Gigantamax
+  sprites
 
 - [unlimitedcoder2](https://github.com/unlimitedcoder2): [ldnrs](https://github.com/unlimitedcoder2/ldnrs),
   the external Windows USB Wi-Fi daemon supported by the optional radio backend

@@ -28,24 +28,12 @@ from pokeldn.sv import (pokemon, port2, raid, raid_encounter, raid_event, raid_p
                         streams, trade)
 from pokeldn.ldn import game_channel
 from pokeldn.ldn.ldn_mitm_host import IpHostTransport
-from pokeldn.ldn.transport import HostTransport, board_radio, find_ap_phy
+from pokeldn.ldn.transport import HostTransport, find_ap_phy
 from pokeldn.host_support import resolve_keys, needs_root
 from pokeldn.ldn import left_after_trade, show_done
 from pokeldn.online import session as online
 from pokeldn.app import screen
 
-PROTOCOL_NAMES = {
-    0x08: "keep alive", 0x2C: "net", 0x30: "turn", 0x58: "rtt", 0x65: "sync",
-    0x68: "unreliable", 0x74: "clone atomic", 0x75: "clone event",
-    0x76: "clone broadcast event", 0x77: "clone clock", 0x7B: "voice", 0x7C: "reliable",
-    0x80: "broadcast reliable", 0x81: "stream broadcast reliable", 0x98: "session",
-    0xA0: "nat traversal result", 0xA4: "monitoring data", 0xAC: "wan nat",
-}
-SESSION_MESSAGE_NAMES = {
-    0: "join request", 1: "join request ack", 2: "join response", 3: "leave request",
-    4: "leave response", 5: "update session", 6: "update session ack", 7: "left station sync",
-    8: "left station sync ack", 9: "start host migration", 10: "start host migration ack",
-}
 
 # The band's dispatch and addressing rules are Arceus's (docs/pla.md).
 ESTABLISHING_FLAGS = pia6.MESSAGE_FLAG_SKIP_SOURCE_CHECK
@@ -80,15 +68,6 @@ def identity_chunk(protocol, port, flags, seat):
     guide: a console that opened its stream twice sent record 1 at 47."""
     return (protocol == PROTO_STREAM_BROADCAST_RELIABLE and port == seat
             and bool(flags & reliable5.FLAG_ZLIB))
-
-
-def _describe(msg):
-    name = PROTOCOL_NAMES.get(msg.protocol, "?")
-    extra = ""
-    if msg.protocol == PROTO_SESSION and msg.payload:
-        extra = f" {SESSION_MESSAGE_NAMES.get(msg.payload[0], '?')}({msg.payload[0]})"
-    return (f"proto 0x{msg.protocol:02x} {name}{extra} port={msg.port} "
-            f"flags=0x{msg.message_flags:02x} len={len(msg.payload)}")
 
 
 def build_net_probe(keys, our_ip, our_mac, station_ips, seqid, nonce8, max_stations,
@@ -222,11 +201,6 @@ def parse_send_payload(hx):
     return streams.parse_send_spec(hx)
 
 
-def apply_offer_fields(plain, settings):
-    """-> the record with each `FIELD=VALUE` written into it (`pokeldn.sv.trade.apply_fields`)."""
-    return trade.apply_fields(plain, settings)
-
-
 def build_parser():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -234,7 +208,7 @@ def build_parser():
     online.add_arguments(ap)
     ap.add_argument("--phy", default="auto")
     ap.add_argument("--channel", type=int, default=None)
-    ap.add_argument("--keys", default="~/.switch/prod.keys")
+    ap.add_argument("--keys", default=None)
     ap.add_argument("--capture", default=None, help="write every datagram here as JSON lines")
     ap.add_argument("--violet", action="store_true",
                     help="advertise Violet's local communication id instead of Scarlet's")
@@ -891,7 +865,9 @@ def main(argv=None):
         print(f"[sv] {ip}: the station list is acknowledged; the raid's streams open")
 
     if raiding:
-        screen.show_raid(raid_group.raid.species, raid_group.raid.stars, 0, args.raid_players)
+        boss = raid_group.raid.boss
+        screen.lobby("Tera Raid", boss["species"], boss["nickname"], args.raid_players,
+                     stars=raid_group.raid.stars, code=args.code, form=boss["form"])
 
     try:
         while time.time() < deadline:
@@ -983,7 +959,7 @@ def main(argv=None):
                     if raid_group.started_at is None:
                         raid_group.leave(stage.index)
                         raid_hosts.pop(ip, None)
-                        screen.raid_lobby(len(raid_group.present()), args.raid_players)
+                        screen.joined(len(raid_group.present()))
                         print(f"[sv] {ip}: left the lobby; seat {stage.index} is free")
                         rest = [o for o in raid_hosts if o in current_ips]
                         if rest:
@@ -1206,7 +1182,7 @@ def main(argv=None):
                     counts[msg.protocol] = counts.get(msg.protocol, 0) + 1
                     if args.print_packets:
                         print(f"[sv] <- {src_ip} {header!r} footer={ids}")
-                        print(f"       {_describe(msg)}  {msg.payload.hex()}")
+                        print(f"       {sv.session.describe_message(msg)}  {msg.payload.hex()}")
                     record(rec="msg", src=src_ip, protocol=msg.protocol, port=msg.port,
                            flags=msg.message_flags, src_var=header.src_var, dst_var=header.dst_var,
                            payload=msg.payload.hex(), t=time.time())
@@ -1539,7 +1515,7 @@ def main(argv=None):
                                     stage = raid_group.seat(seat_of(src_ip), time.time())
                                     if stage is not None:
                                         raid_hosts[src_ip] = stage
-                                        screen.raid_lobby(len(raid_group.present()), args.raid_players)
+                                        screen.joined(len(raid_group.present()))
                                 if (args.announce and slot is not None and src_ip in station_ids
                                         and (src_ip, "accept") not in sent_once):
                                     # The type 9 carries the joiner's station id; the receiver drops
@@ -1608,9 +1584,7 @@ def main(argv=None):
     except KeyboardInterrupt:
         print("\n[sv] interrupted")
     finally:
-        if raiding:
-            screen.reset()
-            screen.drain()
+        screen.drain()
         transport.stop()
         if partner:
             partner.close()
