@@ -4,12 +4,18 @@ sources (stage.py), then the APK. Run with the repository's .venv Python from th
     ./.venv/bin/python examples/android/build.py [--release] [--install DEVICE]
 """
 import argparse
+import base64
+import csv
 import glob
+import hashlib
+import io
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
+from zipfile import ZipFile
 
 HERE = Path(__file__).resolve().parent
 WHEELS = HERE / 'wheels'
@@ -18,6 +24,47 @@ WHEELS = HERE / 'wheels'
 LOCAL = (('python-netlink==0.0.15', {}), ('esptool==5.4.0', {}), ('esp-pylib==1.1.5', {}),
          ('intelhex==2.3.0', {}), ('reedsolo==1.7.0', {}),
          ('msgpack==1.2.3', {'MSGPACK_PUREPYTHON': '1'}))
+
+
+def prepare_esptool_wheel(path: Path) -> None:
+    """Remove host-only console entry points and update RECORD for Chaquopy's Android install."""
+    with ZipFile(path) as source:
+        entries = {info.filename: (info, source.read(info.filename))
+                   for info in source.infolist() if not info.is_dir()}
+
+    entry_points = [name for name in entries if name.startswith('esptool-')
+                    and name.endswith('.dist-info/entry_points.txt')]
+    records = [name for name in entries if name.startswith('esptool-')
+               and name.endswith('.dist-info/RECORD')]
+    if len(entry_points) != 1 or len(records) != 1:
+        raise ValueError(f'Unexpected esptool wheel metadata in {path}')
+
+    # pip on Windows generates .exe launchers from these entry points. Chaquopy rejects
+    # their ../../bin paths in RECORD, and Android calls esptool's Python API directly.
+    entries[entry_points[0]] = (entries[entry_points[0]][0], b'')
+    record_name = records[0]
+    record = io.StringIO(newline='')
+    writer = csv.writer(record, lineterminator='\n')
+    for name, (_, content) in entries.items():
+        if name == record_name:
+            continue
+        digest = base64.urlsafe_b64encode(hashlib.sha256(content).digest()).rstrip(b'=').decode('ascii')
+        writer.writerow((name, f'sha256={digest}', len(content)))
+    writer.writerow((record_name, '', ''))
+    info, _ = entries[record_name]
+    entries[record_name] = (info, record.getvalue().encode('utf-8'))
+
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=path.parent, suffix='.whl', delete=False) as file:
+            temporary = Path(file.name)
+        with ZipFile(temporary, 'w') as destination:
+            for name, (info, content) in entries.items():
+                destination.writestr(info, content)
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 def gradle() -> str:
@@ -42,9 +89,15 @@ def main() -> int:
     WHEELS.mkdir(exist_ok=True)
     for spec, extra in LOCAL:
         name = spec.split('==')[0].replace('-', '_')
-        if not list(WHEELS.glob(f'{name}-*.whl')):
+        wheels = list(WHEELS.glob(f'{name}-*.whl'))
+        if not wheels:
             subprocess.run([sys.executable, '-m', 'pip', 'wheel', '--no-deps', '--no-binary', ':all:',
                             '-w', str(WHEELS), spec], check=True, env={**env, **extra})
+            wheels = list(WHEELS.glob(f'{name}-*.whl'))
+        if name == 'esptool':
+            if len(wheels) != 1:
+                raise ValueError(f'Expected one esptool wheel in {WHEELS}, found {len(wheels)}')
+            prepare_esptool_wheel(wheels[0])
     libs = HERE / 'jniLibs' / 'arm64-v8a'
     if args.native or not all((libs / n).is_file() for n in ('libpokeldn_pkhex.so', 'libunicorn.so')):
         subprocess.run([sys.executable, str(HERE / 'build_native.py')], check=True, env=env)
